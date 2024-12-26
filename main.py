@@ -16,7 +16,7 @@ TELEGRAM_BOT_TOKEN = '7051781121:AAHthFAnh0dgPi93kAzOaVsBpKJIWPK-uv0'
 UISP_API_URL = 'https://zajel.unmsapp.com/nms/api/v2.1'
 UISP_API_TOKEN = '3028da87-0fe9-438b-b13c-b3932499a5bf'
 
-CHAT_IDS = ['2082013863', '-4695079640']
+CHAT_IDS = ['-4695079640']
 STATION_GROUP_CHAT_ID = '-4709273496'
 
 logging.basicConfig(level=logging.DEBUG)
