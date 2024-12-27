@@ -114,6 +114,30 @@ async def handle_station_device(device, application):
         logging.error(f"Error in handle_station_device for {device['identification']['name']}: {str(e)}")
 
 # ----------------------------------------------------------
+# التعامل مع الأزرار التفاعلية
+
+async def handle_device_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    data = query.data
+    if data.startswith("confirm_remove_"):
+        device_id = data.split("_")[2]
+        await query.edit_message_text(
+            f"🗑️ تأكيد إزالة الجهاز {device_id}:\n"
+            f"اكتب كلمة 'دليل' في هذه المحادثة لتأكيد الإزالة."
+        )
+        context.user_data[query.from_user.id] = f"remove_device_{device_id}"
+
+    elif data.startswith("confirm_reconnect_"):
+        device_id = data.split("_")[2]
+        await query.edit_message_text(
+            f"🔄 تأكيد إعادة الربط للجهاز {device_id}:\n"
+            f"اكتب كلمة 'دليل' في هذه المحادثة لتأكيد العملية."
+        )
+        context.user_data[query.from_user.id] = f"reconnect_device_{device_id}"
+
+# ----------------------------------------------------------
 # المراقبة الدورية للشبكة
 
 async def monitor_network(application):
@@ -156,6 +180,8 @@ async def run_bot():
 # ----------------------------------------------------------
 if __name__ == '__main__':
     keep_alive()
+    asyncio.run(run_bot())
+
     loop = asyncio.get_event_loop()
     loop.create_task(run_bot())
     loop.run_forever()
