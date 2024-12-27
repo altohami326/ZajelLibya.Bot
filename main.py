@@ -89,7 +89,7 @@ async def handle_device_action(update: Update, context: ContextTypes.DEFAULT_TYP
             f"🗑️ تأكيد إزالة الجهاز {device_id}:\n"
             f"اكتب كلمة 'دليل' في هذه المحادثة لتأكيد الإزالة."
         )
-        context.user_data['action'] = f"remove_device_{device_id}"
+        context.user_data[query.from_user.id] = f"remove_device_{device_id}"
 
     elif data.startswith("confirm_reconnect_"):
         device_id = data.split("_")[2]
@@ -97,7 +97,7 @@ async def handle_device_action(update: Update, context: ContextTypes.DEFAULT_TYP
             f"🔄 تأكيد إعادة الربط للجهاز {device_id}:\n"
             f"اكتب كلمة 'دليل' في هذه المحادثة لتأكيد العملية."
         )
-        context.user_data['action'] = f"reconnect_device_{device_id}"
+        context.user_data[query.from_user.id] = f"reconnect_device_{device_id}"
 
 # ----------------------------------------------------------
 # تأكيد العمليات عبر النصوص
@@ -105,9 +105,10 @@ async def handle_device_action(update: Update, context: ContextTypes.DEFAULT_TYP
 async def confirm_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_message = update.message.text
     chat_id = update.effective_chat.id
+    user_id = update.effective_user.id
 
     if user_message.lower() == "دليل":
-        action = context.user_data.get('action')
+        action = context.user_data.get(user_id)
         if action:
             device_id = action.split("_")[2]
 
@@ -127,7 +128,7 @@ async def confirm_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 else:
                     await update.message.reply_text(f"❌ تعذرت إعادة ربط الجهاز {device_id}.")
 
-            context.user_data['action'] = None
+            del context.user_data[user_id]  # إزالة العملية بعد التنفيذ
         else:
             await update.message.reply_text("❌ لا يوجد إجراء محدد.")
     else:
