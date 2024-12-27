@@ -1,56 +1,47 @@
-  # main.py (حل نهائي لتشغيل المهام داخل الحلقة النشطة فقط دون استخدام asyncio.run)
-
 import logging
 import requests
 import asyncio
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, ContextTypes, CallbackQueryHandler, MessageHandler, filters
+from telegram.ext import Application, CommandHandler, ContextTypes, CallbackQueryHandler
 from flask import Flask
 from threading import Thread
 import math
-
 from uisp_utils import UispMonitor
 
-# -----------------------------------------------------------------------------------
 # إعداد البيانات
 TELEGRAM_BOT_TOKEN = '7051781121:AAHthFAnh0dgPi93kAzOaVsBpKJIWPK-uv0'
 UISP_API_URL = 'https://zajel.unmsapp.com/nms/api/v2.1'
 UISP_API_TOKEN = '3028da87-0fe9-438b-b13c-b3932499a5bf'
-
-CHAT_IDS = ['2082013863', '-4695079640']
 STATION_GROUP_CHAT_ID = '-4709273496'
 
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.INFO)
 
+# إعداد Flask
 app = Flask('')
 
 @app.route('/')
 def home():
     return "Bot is running!"
 
-def run():
+def run_flask():
     app.run(host='0.0.0.0', port=8080)
 
 def keep_alive():
-    t = Thread(target=run)
-    t.start()
+    thread = Thread(target=run_flask)
+    thread.start()
 
-# ----------------------------------------------------------
-# دالة حساب المسافة بين إحداثيات جغرافية
-
+# حساب المسافة بين إحداثيات جغرافية
 def distance_between(lat1, lon1, lat2, lon2):
-    if lat1 is None or lon1 is None or lat2 is None or lon2 is None:
+    if None in (lat1, lon1, lat2, lon2):
         return None
     R = 6371000  # نصف قطر الأرض بالمتر
     dlat = math.radians(lat2 - lat1)
-    dlon = math.radians(lat2 - lon2)
+    dlon = math.radians(lon2 - lon1)
     a = math.sin(dlat / 2) ** 2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon / 2) ** 2
     c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
     return R * c
 
-# ----------------------------------------------------------
-# إشعار الأجهزة المنقطعة مع أزرار (للأجهزة التي تجاوز انقطاعها 20 يومًا)
-
+# إرسال إشعارات الأجهزة المنقطعة
 async def send_disconnected_device_alert(device, disconnection_duration, application):
     try:
         name = device['identification']['name']
@@ -62,84 +53,45 @@ async def send_disconnected_device_alert(device, disconnection_duration, applica
         if "أيام" in disconnection_duration:
             days = int(disconnection_duration.split()[0])
             if days > 20:
-                keyboard = [
-                    [
-                        InlineKeyboardButton("🗑️ إزالة الجهاز", callback_data=f"confirm_remove_{device_id}"),
-                        InlineKeyboardButton("🔄 إعادة الربط", callback_data=f"confirm_reconnect_{device_id}")
-                    ]
-                ]
-                reply_markup = InlineKeyboardMarkup(keyboard)
-
+                keyboard = [[
+                    InlineKeyboardButton("🗑️ إزالة الجهاز", callback_data=f"remove_{device_id}"),
+                    InlineKeyboardButton("🔄 إعادة الربط", callback_data=f"reconnect_{device_id}")
+                ]]
                 msg = (
                     f"⚠️ الجهاز '{name}' انقطاعه تجاوز 20 يومًا ({disconnection_duration}).\n"
                     f"MAC: {mac_address}\n"
                     f"حالة الكابل: {cable_status}\n"
-                    f"الإشارة: {signal_strength}\n\n"
-                    f"يرجى اتخاذ إجراء إذا لزم الأمر:"
+                    f"الإشارة: {signal_strength}\n"
                 )
-                await application.bot.send_message(chat_id=STATION_GROUP_CHAT_ID, text=msg, reply_markup=reply_markup)
+                await application.bot.send_message(chat_id=STATION_GROUP_CHAT_ID, text=msg, reply_markup=InlineKeyboardMarkup(keyboard))
     except Exception as e:
-        logging.error(f"Error in send_disconnected_device_alert for {device['identification']['name']}: {str(e)}")
+        logging.error(f"Error in send_disconnected_device_alert: {e}")
 
-# ----------------------------------------------------------
 # التعامل مع الأجهزة من نوع Station
-
 async def handle_station_device(device, application):
     try:
         name = device['identification']['name']
-        device_id = device['identification']['id']
-        ip_address = device['overview'].get('ipAddress', 'غير متوفر')
         mac_address = device['identification'].get('mac', 'غير متوفر')
         cable_status = device['overview'].get('cable', 'غير متوفر')
         signal_strength = device['overview'].get('signal', 'غير متوفر')
+        status = device['overview']['status']
 
-        # تحقق من حالة الاتصال
-        if device['overview']['status'] == 'connected':
-            if cable_status in ["10mp", "unplugged"] or (signal_strength != "غير متوفر" and float(signal_strength) < -70):
-                msg = (
-                    f"⚠️ الجهاز '{name}'\n"
-                    f"MAC: {mac_address}\n"
-                    f"عنوان IP: {ip_address}\n"
-                    f"حالة الكابل: {cable_status}\n"
-                    f"الإشارة: {signal_strength}\n"
-                    f"يرجى اتخاذ إجراء."
-                )
-                await application.bot.send_message(chat_id=STATION_GROUP_CHAT_ID, text=msg)
+        if status == 'connected' and (cable_status in ["10mp", "unplugged"] or (signal_strength != "غير متوفر" and float(signal_strength) < -70)):
+            msg = (
+                f"⚠️ الجهاز '{name}' متصل، لكن يوجد مشكلة:\n"
+                f"MAC: {mac_address}\n"
+                f"حالة الكابل: {cable_status}\n"
+                f"الإشارة: {signal_strength}\n"
+            )
+            await application.bot.send_message(chat_id=STATION_GROUP_CHAT_ID, text=msg)
 
-        # تحقق من الأجهزة المنقطعة لمدة تزيد عن 20 يومًا
         disconnection_duration = device['overview'].get('lastSeen')
         if disconnection_duration:
             await send_disconnected_device_alert(device, disconnection_duration, application)
     except Exception as e:
-        logging.error(f"Error in handle_station_device for {device['identification']['name']}: {str(e)}")
+        logging.error(f"Error in handle_station_device: {e}")
 
-# ----------------------------------------------------------
-# التعامل مع الأزرار التفاعلية
-
-async def handle_device_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-
-    data = query.data
-    if data.startswith("confirm_remove_"):
-        device_id = data.split("_")[2]
-        await query.edit_message_text(
-            f"🗑️ تأكيد إزالة الجهاز {device_id}:\n"
-            f"اكتب كلمة 'دليل' في هذه المحادثة لتأكيد الإزالة."
-        )
-        context.user_data[query.from_user.id] = f"remove_device_{device_id}"
-
-    elif data.startswith("confirm_reconnect_"):
-        device_id = data.split("_")[2]
-        await query.edit_message_text(
-           f"🔄 تأكيد إعادة الربط للجهاز {device_id}:\n"
-            f"اكتب كلمة 'دليل' في هذه المحادثة لتأكيد العملية."
-        )
-        context.user_data[query.from_user.id] = f"reconnect_device_{device_id}"
-
-# ----------------------------------------------------------
-# المراقبة الدورية للشبكة
-
+# مراقبة الشبكة
 async def monitor_network(application):
     logging.info("Starting network monitoring...")
     uisp_monitor = UispMonitor(UISP_API_URL, UISP_API_TOKEN)
@@ -149,41 +101,39 @@ async def monitor_network(application):
             response = requests.get(f"{UISP_API_URL}/devices", headers=uisp_monitor.headers)
             if response.status_code == 200:
                 devices = response.json()
-
                 for device in devices:
-                    role = device['identification'].get('role')
-                    if role and isinstance(role, str) and role.lower() == 'station':
-                        try:
-                            await handle_station_device(device, application)
-                        except Exception as e:
-                            logging.error(f"Error handling station device {device['identification']['name']}: {str(e)}")
-
-                await asyncio.sleep(300)
-
+                    if device['identification'].get('role', '').lower() == 'station':
+                        await handle_station_device(device, application)
             else:
-                logging.error(f"Error fetching devices: {response.status_code} - {response.text}")
+                logging.error(f"Error fetching devices: {response.status_code}")
+            await asyncio.sleep(300)
         except Exception as e:
-            logging.error(f"Error in network monitoring loop: {str(e)}")
-            await asyncio.sleep(10)  # لتجنب التكرار السريع في حال وجود خطأ مستمر
+            logging.error(f"Error in monitor_network: {e}")
+            await asyncio.sleep(10)
 
-# ----------------------------------------------------------
+# تشغيل الأزرار التفاعلية
+async def handle_device_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    data = query.data
+
+    if data.startswith("remove_"):
+        device_id = data.split("_")[1]
+        await query.edit_message_text(f"🗑️ تم طلب إزالة الجهاز {device_id}.")
+    elif data.startswith("reconnect_"):
+        device_id = data.split("_")[1]
+        await query.edit_message_text(f"🔄 تم طلب إعادة ربط الجهاز {device_id}.")
+
 # تشغيل البوت
-
-def run_bot():
+async def run_bot():
     application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
     application.add_handler(CommandHandler('start', lambda update, context: update.message.reply_text("البوت يعمل!")))
     application.add_handler(CallbackQueryHandler(handle_device_action))
 
-    # تشغيل المهام داخل الحلقة النشطة
-    loop = asyncio.get_event_loop()
-    loop.create_task(monitor_network(application))  # تشغيل مراقبة الشبكة
-    loop.create_task(application.run_polling())     # تشغيل Telegram polling مرة واحدة فقط
-    logging.info("Polling started for Telegram updates.")
+    asyncio.create_task(monitor_network(application))
+    await application.run_polling()
 
-
-
-# ----------------------------------------------------------
 if __name__ == '__main__':
     keep_alive()
-    run_bot()
+    asyncio.run(run_bot())
     asyncio.get_event_loop().run_forever()
