@@ -136,4 +136,4 @@ async def run_bot():
 if __name__ == '__main__':
     keep_alive()
     asyncio.run(run_bot())
-    asyncio.get_event_loop().run_forever()
+
