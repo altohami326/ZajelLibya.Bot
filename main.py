@@ -1,4 +1,4 @@
-# main.py (نهائي مع تشغيل المهام ضمن الحلقة النشطة فقط)
+# main.py (تحديث نهائي لتشغيل المهام داخل الحلقة النشطة فقط)
 
 import logging
 import requests
@@ -174,16 +174,12 @@ async def run_bot():
     application.add_handler(CommandHandler('start', lambda update, context: update.message.reply_text("البوت يعمل!")))
     application.add_handler(CallbackQueryHandler(handle_device_action))
 
+    # تشغيل المهام داخل الحلقة النشطة
     loop = asyncio.get_event_loop()
-    try:
-        loop.create_task(monitor_network(application))
-        loop.create_task(application.run_polling())
-        loop.run_forever()
-    except Exception as e:
-        logging.error(f"Error while running bot: {str(e)}")
+    loop.create_task(monitor_network(application))
+    loop.create_task(application.run_polling())
 
 # ----------------------------------------------------------
 if __name__ == '__main__':
     keep_alive()
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(run_bot())
+    asyncio.run(run_bot())
