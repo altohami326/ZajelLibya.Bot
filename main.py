@@ -54,6 +54,9 @@ def distance_between(lat1, lon1, lat2, lon2):
 async def send_disconnected_device_alert(device, disconnection_duration, application):
     name = device['identification']['name']
     device_id = device['identification']['id']
+    mac_address = device['identification'].get('mac', 'غير متوفر')
+    cable_status = device['overview'].get('cable', 'غير متوفر')
+    signal_strength = device['overview'].get('signal', 'غير متوفر')
 
     if "أيام" in disconnection_duration:
         days = int(disconnection_duration.split()[0])
@@ -67,19 +70,13 @@ async def send_disconnected_device_alert(device, disconnection_duration, applica
             reply_markup = InlineKeyboardMarkup(keyboard)
 
             msg = (
-                f"⚠️ الجهاز '{name}' انقطاعه تجاوز 20 يومًا ({disconnection_duration}).\n\n"
+                f"⚠️ الجهاز '{name}' انقطاعه تجاوز 20 يومًا ({disconnection_duration}).\n"
+                f"MAC: {mac_address}\n"
+                f"حالة الكابل: {cable_status}\n"
+                f"الإشارة: {signal_strength}\n\n"
                 f"يرجى اتخاذ إجراء إذا لزم الأمر:"
             )
-            for chat_id in CHAT_IDS:
-                await application.bot.send_message(chat_id=chat_id, text=msg, reply_markup=reply_markup)
-        else:
-            # إشعار للأجهزة الأخرى بدون أزرار
-            msg = (
-                f"⚠️ الجهاز '{name}' انقطاعه منذ {disconnection_duration}.\n"
-                f"يرجى مراجعة حالته."
-            )
-            for chat_id in CHAT_IDS:
-                await application.bot.send_message(chat_id=chat_id, text=msg)
+            await application.bot.send_message(chat_id=STATION_GROUP_CHAT_ID, text=msg, reply_markup=reply_markup)
 
 # ----------------------------------------------------------
 # التعامل مع الأزرار (إزالة أو إعادة الربط)
@@ -238,10 +235,7 @@ async def monitor_network(application):
 
                         if status not in ['connected', 'active']:
                             disconnection_duration = uisp_monitor.get_disconnection_duration(device)
-                            await application.bot.send_message(chat_id=STATION_GROUP_CHAT_ID, text=(
-                                f"⚠️ {device['identification']['name']} (Station) انقطاعه منذ {disconnection_duration}.\n"
-                                f"عنوان IP: {ip_address}"
-                            ))
+                            await send_disconnected_device_alert(device, disconnection_duration, application)
 
                     elif status not in ['connected', 'active']:
                         disconnection_duration = uisp_monitor.get_disconnection_duration(device)
