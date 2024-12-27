@@ -1,4 +1,4 @@
-# main.py (محدث مع معالجة الأخطاء وتحسين الكود)
+# main.py (محدث مع معالجة نهائية لمشكلة event loop)
 
 import logging
 import requests
@@ -177,7 +177,8 @@ async def run_bot():
     loop = asyncio.get_event_loop()
     try:
         loop.create_task(monitor_network(application))
-        await application.run_polling()
+        loop.create_task(application.run_polling())
+        loop.run_forever()
     except Exception as e:
         logging.error(f"Error while running bot: {str(e)}")
 
