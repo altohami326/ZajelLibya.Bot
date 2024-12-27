@@ -1,16 +1,19 @@
-# main.py (المحدثة مع الأزرار التفاعلية للإشعارات)
-
 import logging
 import requests
 import asyncio
+import re  # <-- لإستخراج الرقم من مدة الانقطاع
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, ContextTypes, CallbackQueryHandler, MessageHandler, filters
+from telegram.ext import Application, CommandHandler, ContextTypes, CallbackQueryHandler
 from flask import Flask
 from threading import Thread
 import json
 import math
 
-from uisp_utils import UispMonitor
+from uisp_utils import (
+    UispMonitor,
+    remove_device_from_uisp_api,
+    reconnect_device_to_uisp_api,
+)
 
 # -----------------------------------------------------------------------------------
 # إعداد البيانات
@@ -37,108 +40,31 @@ def keep_alive():
     t.start()
 
 # ----------------------------------------------------------
-# دالة حساب المسافة بين إحداثيات جغرافية
-
+# دالة بسيطة لحساب المسافة بالأمتار بين نقطتين (lat1, lon1) و (lat2, lon2)
 def distance_between(lat1, lon1, lat2, lon2):
+    # في حال عدم وجود إحداثيات، نرجع None
     if lat1 is None or lon1 is None or lat2 is None or lon2 is None:
         return None
+
     R = 6371000  # نصف قطر الأرض بالمتر
     dlat = math.radians(lat2 - lat1)
     dlon = math.radians(lon2 - lon1)
     a = math.sin(dlat / 2) ** 2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon / 2) ** 2
     c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
-    return R * c
+    dist = R * c
+    return dist
 
 # ----------------------------------------------------------
-# إشعار الأجهزة المنقطعة مع أزرار
-
-async def send_disconnected_device_alert(device, disconnection_duration, application):
-    name = device['identification']['name']
-    device_id = device['identification']['id']
-
-    # إذا تجاوزت مدة الانقطاع 20 يومًا
-    if "أيام" in disconnection_duration:
-        days = int(disconnection_duration.split()[0])
-        if days > 20:
-            keyboard = [
-                [
-                    InlineKeyboardButton("🗑️ إزالة الجهاز", callback_data=f"confirm_remove_{device_id}"),
-                    InlineKeyboardButton("🔄 إعادة الربط", callback_data=f"confirm_reconnect_{device_id}")
-                ]
-            ]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-
-            msg = (
-                f"⚠️ الجهاز '{name}' انقطاعه تجاوز 20 يومًا ({disconnection_duration}).\n\n"
-                f"يرجى اتخاذ إجراء إذا لزم الأمر:"
-            )
-            for chat_id in CHAT_IDS:
-                await application.bot.send_message(chat_id=chat_id, text=msg, reply_markup=reply_markup)
-
-# ----------------------------------------------------------
-# التعامل مع الأزرار
-
-async def handle_device_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-
-    data = query.data
-    if data.startswith("confirm_remove_"):
-        device_id = data.split("_")[2]
-        await query.edit_message_text(
-            f"🗑️ تأكيد إزالة الجهاز {device_id}:\n"
-            f"اكتب كلمة 'دليل' في هذه المحادثة لتأكيد الإزالة."
-        )
-        context.user_data['action'] = f"remove_device_{device_id}"
-
-    elif data.startswith("confirm_reconnect_"):
-        device_id = data.split("_")[2]
-        await query.edit_message_text(
-            f"🔄 تأكيد إعادة الربط للجهاز {device_id}:\n"
-            f"اكتب كلمة 'دليل' في هذه المحادثة لتأكيد العملية."
-        )
-        context.user_data['action'] = f"reconnect_device_{device_id}"
-
-# ----------------------------------------------------------
-# تأكيد العمليات عبر النصوص
-
-async def confirm_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_message = update.message.text
-    chat_id = update.effective_chat.id
-
-    if user_message.lower() == "دليل":
-        action = context.user_data.get('action')
-        if action:
-            device_id = action.split("_")[2]
-
-            if action.startswith("remove_device_"):
-                uisp_monitor = UispMonitor(UISP_API_URL, UISP_API_TOKEN)
-                result = uisp_monitor.remove_device(device_id)
-                if result:
-                    await update.message.reply_text(f"🗑️ تم إزالة الجهاز {device_id} بنجاح.")
-                else:
-                    await update.message.reply_text(f"❌ تعذرت إزالة الجهاز {device_id}.")
-
-            elif action.startswith("reconnect_device_"):
-                uisp_monitor = UispMonitor(UISP_API_URL, UISP_API_TOKEN)
-                result = uisp_monitor.reconnect_device(device_id)
-                if result:
-                    await update.message.reply_text(f"🔄 تم إعادة ربط الجهاز {device_id} بنجاح.")
-                else:
-                    await update.message.reply_text(f"❌ تعذرت إعادة ربط الجهاز {device_id}.")
-
-            context.user_data['action'] = None
-        else:
-            await update.message.reply_text("❌ لا يوجد إجراء محدد.")
-    else:
-        await update.message.reply_text("⚠️ يجب كتابة كلمة 'دليل' لتأكيد الإجراء.")
-
-# ----------------------------------------------------------
-# مراقبة الترددات والمسافات بين نقاط الوصول (Access Points)
-
 async def check_ap_frequencies(application, devices, uisp_monitor):
-    DISTANCE_THRESHOLD = 200.0  # المسافة القصوى بالأمتار
-    FREQUENCY_DIFF_THRESHOLD = 20.0  # الفرق المسموح بالترددات
+    """
+    - نجمع أجهزة الـAP فقط
+    - نأتي بموقعها (lat/long) وترددها
+    - نقارن كل جهازين لمعرفة ما إذا كانت المسافة < 200 متر
+      والفرق بالتردد < 20 MHz
+    - إذا تحقق الشرطان نرسل تنبيه.
+    """
+    DISTANCE_THRESHOLD = 200.0  # 200 متر
+    FREQUENCY_DIFF_THRESHOLD = 20.0  # 20 ميجاهرتز
 
     ap_list = []
     for device in devices:
@@ -164,6 +90,7 @@ async def check_ap_frequencies(application, devices, uisp_monitor):
                 'lon': float(lon)
             })
 
+    # نقارن كل جهازين
     checked_pairs = set()
     for i in range(len(ap_list)):
         for j in range(i+1, len(ap_list)):
@@ -191,11 +118,81 @@ async def check_ap_frequencies(application, devices, uisp_monitor):
             checked_pairs.add((ap1['id'], ap2['id']))
 
 # ----------------------------------------------------------
-# المراقبة الدورية للشبكة
+def build_device_message(device, cable_status=None, signal_strength=None, connection_duration=None, disconnection_duration=None):
+    name = device['identification']['name']
+    role = device['identification']['role']
+    status = device['overview']['status']
+    model = device['identification'].get('model', 'غير متوفر')
+    mac_address = device['identification'].get('mac', 'غير متوفر')
 
+    message = (
+        f"الجهاز: {name} ({role})\n"
+        f"الحالة: {status}\n"
+        f"موديل: {model}\n"
+    )
+
+    if cable_status is not None:
+        message += f"حالة الكابل: {cable_status}\n"
+
+    if signal_strength is not None:
+        message += f"الإشارة: {signal_strength}\n"
+
+    if connection_duration is not None:
+        message += f"مدة الاتصال: {connection_duration}\n"
+
+    if disconnection_duration is not None:
+        message += f"مدة الانقطاع: {disconnection_duration}\n"
+
+    message += f"MAC: {mac_address}"
+    return message
+
+# ----------------------------------------------------------
+def extract_days_from_text(disconnection_text):
+    """
+    تحاول إيجاد رقم الأيام من نص مثل "21 أيام" أو "3 أيام"...
+    """
+    match = re.search(r"(\d+)", disconnection_text)
+    if match:
+        return int(match.group(1))
+    return None
+
+def build_disconnected_device_message(device, disconnection_duration, ip_address):
+    """
+    تبني الرسالة الخاصة بالجهاز المنقطع،
+    وإذا كانت مدة الانقطاع > 20 يومًا نضيف الأزرار.
+    """
+    base_msg = build_device_message(device, disconnection_duration=disconnection_duration)
+    base_msg += f"\nعنوان IP: {ip_address}"
+
+    # استخراج الرقم من النص
+    days_extracted = extract_days_from_text(disconnection_duration)
+
+    if days_extracted and days_extracted >= 20:
+        # إعداد أزرار الإزالة وإعادة الربط
+        device_id = device['identification']['id']
+        remove_btn = InlineKeyboardButton(
+            text="إزالة الجهاز ❌",
+            callback_data=f"remove_device_{device_id}"
+        )
+        reconnect_btn = InlineKeyboardButton(
+            text="إعادة ربط الجهاز ♻️",
+            callback_data=f"reconnect_device_{device_id}"
+        )
+        keyboard = [[remove_btn, reconnect_btn]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        return base_msg, reply_markup
+    
+    # إن لم تصل 20 يومًا، نُعيد الرسالة دون أزرار
+    return base_msg, None
+
+# ----------------------------------------------------------
 async def monitor_network(application):
     logging.info("Starting network monitoring...")
-    uisp_monitor = UispMonitor(UISP_API_URL, UISP_API_TOKEN)
+    uisp_monitor = application.bot_data.get("uisp_monitor")
+    if not uisp_monitor:
+        # في حال لم نجد كائن الـUispMonitor => نصنعه هنا (كحالة احتياطية)
+        uisp_monitor = UispMonitor(UISP_API_URL, UISP_API_TOKEN)
+        application.bot_data["uisp_monitor"] = uisp_monitor
 
     while True:
         try:
@@ -203,6 +200,7 @@ async def monitor_network(application):
             if response.status_code == 200:
                 devices = response.json()
 
+                # أولاً: فحص كل الأجهزة لإرسال التنبيهات الخاصة بالStation وغيرها
                 for device in devices:
                     role = device['identification']['role']
                     status = device['overview']['status']
@@ -212,27 +210,56 @@ async def monitor_network(application):
                     signal_strength = uisp_monitor.get_signal_strength(device)
                     connection_duration = uisp_monitor.get_connection_duration(device)
 
+                    # ------ معالجة أجهزة station ------
                     if role == 'station':
                         if status == 'connected':
+                            # تنبيه إذا السرعة 10mp أو الكابل غير موصول
                             if cable_status in ["10mp","unplugged"]:
                                 msg = (
-                                    f"⚠️ {device['identification']['name']} (Station) يواجه مشكلة في الكابل ({cable_status}).\n"
+                                    f"⚠️ {build_device_message(device, cable_status=cable_status, signal_strength=signal_strength, connection_duration=connection_duration)}\n"
                                     f"عنوان IP: {ip_address}"
                                 )
                                 await application.bot.send_message(chat_id=STATION_GROUP_CHAT_ID, text=msg)
 
-                            elif signal_strength != "غير متوفر" and float(signal_strength) < -75:
-                                msg = (
-                                    f"📡 تنبيه: إشارة ضعيفة للجهاز {device['identification']['name']}\n"
-                                    f"الإشارة: {signal_strength}\n"
-                                    f"عنوان IP: {ip_address}"
-                                )
-                                await application.bot.send_message(chat_id=STATION_GROUP_CHAT_ID, text=msg)
+                            # تنبيه إذا الإشارة ضعيفة
+                            elif signal_strength != "غير متوفر":
+                                try:
+                                    if float(signal_strength) < -75:
+                                        msg = (
+                                            f"📡 تنبيه: {build_device_message(device, signal_strength=signal_strength, connection_duration=connection_duration)}\n"
+                                            f"عنوان IP: {ip_address}"
+                                        )
+                                        await application.bot.send_message(chat_id=STATION_GROUP_CHAT_ID, text=msg)
+                                except ValueError:
+                                    logging.debug("تعذّر تحويل الإشارة إلى رقم.")
+                        continue
 
+                    # ------ أجهزة أخرى (غير station) ------
                     if status not in ['connected', 'active']:
                         disconnection_duration = uisp_monitor.get_disconnection_duration(device)
-                        await send_disconnected_device_alert(device, disconnection_duration, application)
 
+                        msg_text, reply_markup = build_disconnected_device_message(
+                            device,
+                            disconnection_duration,
+                            ip_address
+                        )
+                        for chat_id in CHAT_IDS:
+                            await application.bot.send_message(
+                                chat_id=chat_id,
+                                text=f"⚠️ {msg_text}",
+                                reply_markup=reply_markup
+                            )
+
+                    # تنبيه للكابل لو كان أقل من 1000mp (كالسابق)
+                    if cable_status in ["10mp", "unplugged"]:
+                        for chat_id in CHAT_IDS:
+                            msg = (
+                                f"🔌 تنبيه: {build_device_message(device, cable_status=cable_status)}\n"
+                                f"عنوان IP: {ip_address}"
+                            )
+                            await application.bot.send_message(chat_id=chat_id, text=msg)
+
+                # ثانيًا: مقارنة ترددات الـAP القريبة
                 await check_ap_frequencies(application, devices, uisp_monitor)
 
             else:
@@ -240,18 +267,135 @@ async def monitor_network(application):
         except Exception as e:
             logging.error(f"Error in network monitoring: {str(e)}")
 
+        # انتظر 5 دقائق
         await asyncio.sleep(300)
 
 # ----------------------------------------------------------
-# تشغيل البوت
+# دالة /start (لم تتغير)
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    logging.info(f"Chat ID: {chat_id}")
+    await update.message.reply_text(f"معرف المجموعة أو المحادثة: {chat_id}")
 
+# ----------------------------------------------------------
+# #### 1) معالجة ضغط الأزرار (CallbackQueryHandler) ####
+
+async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    data = query.data
+    # لإيقاف مؤشر التحميل في الواجهة
+    await query.answer()
+
+    if data.startswith("remove_device_"):
+        device_id = data.split("_")[-1]
+        # نعرض رسالة التأكيد
+        await confirm_remove_device(update, context, device_id)
+
+    elif data.startswith("reconnect_device_"):
+        device_id = data.split("_")[-1]
+        # نعرض رسالة التأكيد
+        await confirm_reconnect_device(update, context, device_id)
+
+    elif data.startswith("confirm_remove_"):
+        device_id = data.split("_")[-1]
+        # نفّذ العملية الفعلية
+        await remove_device_from_uisp(update, context, device_id)
+
+    elif data.startswith("confirm_reconnect_"):
+        device_id = data.split("_")[-1]
+        # نفّذ العملية الفعلية
+        await reconnect_device_on_uisp(update, context, device_id)
+
+    elif data == "cancel_remove":
+        await query.edit_message_text("تم إلغاء عملية الإزالة.")
+    elif data == "cancel_reconnect":
+        await query.edit_message_text("تم إلغاء عملية إعادة الربط.")
+
+async def confirm_remove_device(update: Update, context: ContextTypes.DEFAULT_TYPE, device_id):
+    query = update.callback_query
+    text_msg = f"هل أنت متأكد من إزالة الجهاز {device_id} من UISP؟"
+
+    buttons = [
+        [
+            InlineKeyboardButton("نعم، إزالة ✅", callback_data=f"confirm_remove_{device_id}"),
+            InlineKeyboardButton("إلغاء ❌", callback_data="cancel_remove")
+        ]
+    ]
+    reply_markup = InlineKeyboardMarkup(buttons)
+    await query.edit_message_text(text=text_msg, reply_markup=reply_markup)
+
+async def confirm_reconnect_device(update: Update, context: ContextTypes.DEFAULT_TYPE, device_id):
+    query = update.callback_query
+    text_msg = f"هل أنت متأكد من إعادة ربط الجهاز {device_id} بالـUISP؟"
+
+    buttons = [
+        [
+            InlineKeyboardButton("نعم، أعد ربطه ✅", callback_data=f"confirm_reconnect_{device_id}"),
+            InlineKeyboardButton("إلغاء ❌", callback_data="cancel_reconnect")
+        ]
+    ]
+    reply_markup = InlineKeyboardMarkup(buttons)
+    await query.edit_message_text(text=text_msg, reply_markup=reply_markup)
+
+async def remove_device_from_uisp(update: Update, context: ContextTypes.DEFAULT_TYPE, device_id):
+    query = update.callback_query
+    uisp_monitor = context.bot_data.get("uisp_monitor")
+    if not uisp_monitor:
+        uisp_monitor = UispMonitor(UISP_API_URL, UISP_API_TOKEN)
+        context.bot_data["uisp_monitor"] = uisp_monitor
+
+    status_code, resp_text = remove_device_from_uisp_api(
+        uisp_monitor.api_url,
+        uisp_monitor.headers,
+        device_id
+    )
+
+    if status_code == 204:
+        await query.edit_message_text(f"تمت إزالة الجهاز {device_id} بنجاح من UISP.")
+    elif status_code:
+        await query.edit_message_text(
+            f"فشل إزالة الجهاز، الرمز: {status_code}\nالرسالة: {resp_text}"
+        )
+    else:
+        await query.edit_message_text(f"حدث خطأ أثناء محاولة الإزالة: {resp_text}")
+
+async def reconnect_device_on_uisp(update: Update, context: ContextTypes.DEFAULT_TYPE, device_id):
+    query = update.callback_query
+    uisp_monitor = context.bot_data.get("uisp_monitor")
+    if not uisp_monitor:
+        uisp_monitor = UispMonitor(UISP_API_URL, UISP_API_TOKEN)
+        context.bot_data["uisp_monitor"] = uisp_monitor
+
+    status_code, resp_text = reconnect_device_to_uisp_api(
+        uisp_monitor.api_url,
+        uisp_monitor.headers,
+        device_id
+    )
+
+    if status_code == 200:
+        await query.edit_message_text(f"تمت إعادة ربط الجهاز {device_id} بنجاح.")
+    else:
+        await query.edit_message_text(
+            f"فشل إعادة الربط، الرمز: {status_code}\nالرسالة: {resp_text}"
+        )
+
+# ----------------------------------------------------------
+# #### 2) تشغيل البوت ####
 async def run_bot():
     application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
-    application.add_handler(CommandHandler('start', lambda update, context: update.message.reply_text("البوت يعمل!")))
-    application.add_handler(CallbackQueryHandler(handle_device_action))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, confirm_action))
 
+    # تخزين كائن UispMonitor في bot_data كي يستخدمه الكل
+    uisp_monitor = UispMonitor(UISP_API_URL, UISP_API_TOKEN)
+    application.bot_data["uisp_monitor"] = uisp_monitor
+
+    # إضافة الهاندلرز
+    application.add_handler(CommandHandler('start', start))
+    application.add_handler(CallbackQueryHandler(handle_callback_query))
+
+    # بدء مهمة مراقبة الشبكة
     asyncio.create_task(monitor_network(application))
+
+    # بدء البولنغ
     await application.run_polling()
 
 # ----------------------------------------------------------
