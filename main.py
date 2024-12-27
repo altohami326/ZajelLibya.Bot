@@ -1,4 +1,4 @@
-# main.py (المحدثة مع الأزرار التفاعلية للإشعارات)
+# main.py (محدث مع الحفاظ على الميزات القديمة والجديدة)
 
 import logging
 import requests
@@ -7,7 +7,6 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, ContextTypes, CallbackQueryHandler, MessageHandler, filters
 from flask import Flask
 from threading import Thread
-import json
 import math
 
 from uisp_utils import UispMonitor
@@ -50,13 +49,12 @@ def distance_between(lat1, lon1, lat2, lon2):
     return R * c
 
 # ----------------------------------------------------------
-# إشعار الأجهزة المنقطعة مع أزرار
+# إشعار الأجهزة المنقطعة مع أزرار (للأجهزة التي تجاوز انقطاعها 20 يومًا)
 
 async def send_disconnected_device_alert(device, disconnection_duration, application):
     name = device['identification']['name']
     device_id = device['identification']['id']
 
-    # إذا تجاوزت مدة الانقطاع 20 يومًا
     if "أيام" in disconnection_duration:
         days = int(disconnection_duration.split()[0])
         if days > 20:
@@ -74,9 +72,17 @@ async def send_disconnected_device_alert(device, disconnection_duration, applica
             )
             for chat_id in CHAT_IDS:
                 await application.bot.send_message(chat_id=chat_id, text=msg, reply_markup=reply_markup)
+        else:
+            # إشعار للأجهزة الأخرى بدون أزرار
+            msg = (
+                f"⚠️ الجهاز '{name}' انقطاعه منذ {disconnection_duration}.\n"
+                f"يرجى مراجعة حالته."
+            )
+            for chat_id in CHAT_IDS:
+                await application.bot.send_message(chat_id=chat_id, text=msg)
 
 # ----------------------------------------------------------
-# التعامل مع الأزرار
+# التعامل مع الأزرار (إزالة أو إعادة الربط)
 
 async def handle_device_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -128,7 +134,7 @@ async def confirm_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 else:
                     await update.message.reply_text(f"❌ تعذرت إعادة ربط الجهاز {device_id}.")
 
-            del context.user_data[user_id]  # إزالة العملية بعد التنفيذ
+            del context.user_data[user_id]
         else:
             await update.message.reply_text("❌ لا يوجد إجراء محدد.")
     else:
@@ -215,13 +221,12 @@ async def monitor_network(application):
 
                     if role.lower() == 'station':
                         if status == 'connected':
-                            if cable_status in ["10mp", "unplugged"]:
+                            if cable_status in ["10mp","unplugged"]:
                                 msg = (
                                     f"⚠️ {device['identification']['name']} (Station) يواجه مشكلة في الكابل ({cable_status}).\n"
                                     f"عنوان IP: {ip_address}"
                                 )
                                 await application.bot.send_message(chat_id=STATION_GROUP_CHAT_ID, text=msg)
-                                await asyncio.sleep(1)  # تأخير صغير بين الرسائل
 
                             elif signal_strength != "غير متوفر" and float(signal_strength) < -75:
                                 msg = (
@@ -230,7 +235,6 @@ async def monitor_network(application):
                                     f"عنوان IP: {ip_address}"
                                 )
                                 await application.bot.send_message(chat_id=STATION_GROUP_CHAT_ID, text=msg)
-                                await asyncio.sleep(1)  # تأخير صغير بين الرسائل
 
                         if status not in ['connected', 'active']:
                             disconnection_duration = uisp_monitor.get_disconnection_duration(device)
@@ -238,12 +242,10 @@ async def monitor_network(application):
                                 f"⚠️ {device['identification']['name']} (Station) انقطاعه منذ {disconnection_duration}.\n"
                                 f"عنوان IP: {ip_address}"
                             ))
-                            await asyncio.sleep(1)  # تأخير صغير بين الرسائل
 
                     elif status not in ['connected', 'active']:
                         disconnection_duration = uisp_monitor.get_disconnection_duration(device)
                         await send_disconnected_device_alert(device, disconnection_duration, application)
-                        await asyncio.sleep(1)  # تأخير صغير بين الرسائل
 
                 await check_ap_frequencies(application, devices, uisp_monitor)
 
