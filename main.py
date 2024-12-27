@@ -102,7 +102,8 @@ async def monitor_network(application):
             if response.status_code == 200:
                 devices = response.json()
                 for device in devices:
-                    if device['identification'].get('role', '').lower() == 'station':
+                    role = device['identification'].get('role')
+                    if role and isinstance(role, str) and role.lower() == 'station':
                         await handle_station_device(device, application)
             else:
                 logging.error(f"Error fetching devices: {response.status_code}")
@@ -130,10 +131,10 @@ async def run_bot():
     application.add_handler(CommandHandler('start', lambda update, context: update.message.reply_text("البوت يعمل!")))
     application.add_handler(CallbackQueryHandler(handle_device_action))
 
-    asyncio.create_task(monitor_network(application))
+    loop = asyncio.get_event_loop()
+    loop.create_task(monitor_network(application))
     await application.run_polling()
 
 if __name__ == '__main__':
     keep_alive()
-    asyncio.run(run_bot())
-
+    asyncio.get_event_loop().run_forever()
