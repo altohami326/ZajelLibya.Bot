@@ -124,7 +124,7 @@ async def handle_device_action(update: Update, context: ContextTypes.DEFAULT_TYP
     if data.startswith("confirm_remove_"):
         device_id = data.split("_")[2]
         await query.edit_message_text(
-            f"🗑️ تأكيد إزالة الجهاز {device_id}:
+            f"🗑️ تأكيد إزالة الجهاز {device_id}:\n"
 "
             f"اكتب كلمة 'دليل' في هذه المحادثة لتأكيد الإزالة."
         )
@@ -133,7 +133,7 @@ async def handle_device_action(update: Update, context: ContextTypes.DEFAULT_TYP
     elif data.startswith("confirm_reconnect_"):
         device_id = data.split("_")[2]
         await query.edit_message_text(
-            f"🔄 تأكيد إعادة الربط للجهاز {device_id}:
+           f"🔄 تأكيد إعادة الربط للجهاز {device_id}:\n"
 "
             f"اكتب كلمة 'دليل' في هذه المحادثة لتأكيد العملية."
         )
