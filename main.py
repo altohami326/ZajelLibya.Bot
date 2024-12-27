@@ -125,7 +125,6 @@ async def handle_device_action(update: Update, context: ContextTypes.DEFAULT_TYP
         device_id = data.split("_")[2]
         await query.edit_message_text(
             f"🗑️ تأكيد إزالة الجهاز {device_id}:\n"
-"
             f"اكتب كلمة 'دليل' في هذه المحادثة لتأكيد الإزالة."
         )
         context.user_data[query.from_user.id] = f"remove_device_{device_id}"
@@ -134,7 +133,6 @@ async def handle_device_action(update: Update, context: ContextTypes.DEFAULT_TYP
         device_id = data.split("_")[2]
         await query.edit_message_text(
            f"🔄 تأكيد إعادة الربط للجهاز {device_id}:\n"
-"
             f"اكتب كلمة 'دليل' في هذه المحادثة لتأكيد العملية."
         )
         context.user_data[query.from_user.id] = f"reconnect_device_{device_id}"
