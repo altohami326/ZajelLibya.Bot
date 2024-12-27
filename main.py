@@ -1,4 +1,4 @@
-# main.py (تحديث نهائي لحل مشكلة الحلقة النشطة مع Telegram Bot)
+# main.py (حل نهائي لتشغيل المهام داخل الحلقة النشطة فقط دون استخدام asyncio.run)
 
 import logging
 import requests
@@ -124,7 +124,8 @@ async def handle_device_action(update: Update, context: ContextTypes.DEFAULT_TYP
     if data.startswith("confirm_remove_"):
         device_id = data.split("_")[2]
         await query.edit_message_text(
-            f"🗑️ تأكيد إزالة الجهاز {device_id}:\n"
+            f"🗑️ تأكيد إزالة الجهاز {device_id}:
+"
             f"اكتب كلمة 'دليل' في هذه المحادثة لتأكيد الإزالة."
         )
         context.user_data[query.from_user.id] = f"remove_device_{device_id}"
@@ -132,7 +133,8 @@ async def handle_device_action(update: Update, context: ContextTypes.DEFAULT_TYP
     elif data.startswith("confirm_reconnect_"):
         device_id = data.split("_")[2]
         await query.edit_message_text(
-            f"🔄 تأكيد إعادة الربط للجهاز {device_id}:\n"
+            f"🔄 تأكيد إعادة الربط للجهاز {device_id}:
+"
             f"اكتب كلمة 'دليل' في هذه المحادثة لتأكيد العملية."
         )
         context.user_data[query.from_user.id] = f"reconnect_device_{device_id}"
@@ -169,7 +171,7 @@ async def monitor_network(application):
 # ----------------------------------------------------------
 # تشغيل البوت
 
-async def run_bot():
+def run_bot():
     application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
     application.add_handler(CommandHandler('start', lambda update, context: update.message.reply_text("البوت يعمل!")))
     application.add_handler(CallbackQueryHandler(handle_device_action))
@@ -178,9 +180,9 @@ async def run_bot():
     loop = asyncio.get_event_loop()
     loop.create_task(monitor_network(application))
     loop.create_task(application.run_polling())
-    await asyncio.Event().wait()  # استمرار الحلقة إلى أجل غير مسمى
 
 # ----------------------------------------------------------
 if __name__ == '__main__':
     keep_alive()
-    asyncio.run(run_bot())
+    run_bot()
+    asyncio.get_event_loop().run_forever()
