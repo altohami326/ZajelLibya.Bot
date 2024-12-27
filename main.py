@@ -175,16 +175,17 @@ async def run_bot():
     application.add_handler(CallbackQueryHandler(handle_device_action))
 
     loop = asyncio.get_event_loop()
-    try:
-        loop.create_task(monitor_network(application))
+    if loop.is_running():
+        logging.info("Using existing event loop.")
         await application.run_polling()
-    except Exception as e:
-        logging.error(f"Error while running bot: {str(e)}")
+    else:
+        logging.info("Starting new event loop.")
+        loop.run_until_complete(application.run_polling())
 
 # ----------------------------------------------------------
 if __name__ == '__main__':
     keep_alive()
-    asyncio.run(run_bot())
-    loop = asyncio.get_event_loop()
-    loop.create_task(run_bot())
-    loop.run_forever()
+    try:
+        asyncio.run(run_bot())
+    except RuntimeError as e:
+        logging.error(f"Failed to run bot: {str(e)}")
