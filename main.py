@@ -213,7 +213,7 @@ async def monitor_network(application):
                     signal_strength = uisp_monitor.get_signal_strength(device)
                     connection_duration = uisp_monitor.get_connection_duration(device)
 
-                    if role == 'station':
+                    if role.lower() == 'station':
                         if status == 'connected':
                             if cable_status in ["10mp","unplugged"]:
                                 msg = (
@@ -230,7 +230,14 @@ async def monitor_network(application):
                                 )
                                 await application.bot.send_message(chat_id=STATION_GROUP_CHAT_ID, text=msg)
 
-                    if status not in ['connected', 'active']:
+                        if status not in ['connected', 'active']:
+                            disconnection_duration = uisp_monitor.get_disconnection_duration(device)
+                            await application.bot.send_message(chat_id=STATION_GROUP_CHAT_ID, text=(
+                                f"⚠️ {device['identification']['name']} (Station) انقطاعه منذ {disconnection_duration}.\n"
+                                f"عنوان IP: {ip_address}"
+                            ))
+
+                    elif status not in ['connected', 'active']:
                         disconnection_duration = uisp_monitor.get_disconnection_duration(device)
                         await send_disconnected_device_alert(device, disconnection_duration, application)
 
