@@ -175,17 +175,13 @@ async def run_bot():
     application.add_handler(CallbackQueryHandler(handle_device_action))
 
     loop = asyncio.get_event_loop()
-    if loop.is_running():
+    try:
         loop.create_task(monitor_network(application))
         await application.run_polling()
-    else:
-        loop.run_until_complete(monitor_network(application))
-        await application.run_polling()
+    except Exception as e:
+        logging.error(f"Error while running bot: {str(e)}")
 
 # ----------------------------------------------------------
 if __name__ == '__main__':
     keep_alive()
-    try:
-        asyncio.run(run_bot())
-    except RuntimeError as e:
-        logging.error(f"Failed to run bot: {str(e)}")
+    asyncio.run(run_bot())
