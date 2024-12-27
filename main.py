@@ -1,4 +1,4 @@
-# main.py (محدث مع الحفاظ على الميزات القديمة والجديدة)
+# main.py (محدث مع معالجة الأخطاء وتحسين الكود)
 
 import logging
 import requests
@@ -52,60 +52,66 @@ def distance_between(lat1, lon1, lat2, lon2):
 # إشعار الأجهزة المنقطعة مع أزرار (للأجهزة التي تجاوز انقطاعها 20 يومًا)
 
 async def send_disconnected_device_alert(device, disconnection_duration, application):
-    name = device['identification']['name']
-    device_id = device['identification']['id']
-    mac_address = device['identification'].get('mac', 'غير متوفر')
-    cable_status = device['overview'].get('cable', 'غير متوفر')
-    signal_strength = device['overview'].get('signal', 'غير متوفر')
+    try:
+        name = device['identification']['name']
+        device_id = device['identification']['id']
+        mac_address = device['identification'].get('mac', 'غير متوفر')
+        cable_status = device['overview'].get('cable', 'غير متوفر')
+        signal_strength = device['overview'].get('signal', 'غير متوفر')
 
-    if "أيام" in disconnection_duration:
-        days = int(disconnection_duration.split()[0])
-        if days > 20:
-            keyboard = [
-                [
-                    InlineKeyboardButton("🗑️ إزالة الجهاز", callback_data=f"confirm_remove_{device_id}"),
-                    InlineKeyboardButton("🔄 إعادة الربط", callback_data=f"confirm_reconnect_{device_id}")
+        if "أيام" in disconnection_duration:
+            days = int(disconnection_duration.split()[0])
+            if days > 20:
+                keyboard = [
+                    [
+                        InlineKeyboardButton("🗑️ إزالة الجهاز", callback_data=f"confirm_remove_{device_id}"),
+                        InlineKeyboardButton("🔄 إعادة الربط", callback_data=f"confirm_reconnect_{device_id}")
+                    ]
                 ]
-            ]
-            reply_markup = InlineKeyboardMarkup(keyboard)
+                reply_markup = InlineKeyboardMarkup(keyboard)
 
-            msg = (
-                f"⚠️ الجهاز '{name}' انقطاعه تجاوز 20 يومًا ({disconnection_duration}).\n"
-                f"MAC: {mac_address}\n"
-                f"حالة الكابل: {cable_status}\n"
-                f"الإشارة: {signal_strength}\n\n"
-                f"يرجى اتخاذ إجراء إذا لزم الأمر:"
-            )
-            await application.bot.send_message(chat_id=STATION_GROUP_CHAT_ID, text=msg, reply_markup=reply_markup)
+                msg = (
+                    f"⚠️ الجهاز '{name}' انقطاعه تجاوز 20 يومًا ({disconnection_duration}).\n"
+                    f"MAC: {mac_address}\n"
+                    f"حالة الكابل: {cable_status}\n"
+                    f"الإشارة: {signal_strength}\n\n"
+                    f"يرجى اتخاذ إجراء إذا لزم الأمر:"
+                )
+                await application.bot.send_message(chat_id=STATION_GROUP_CHAT_ID, text=msg, reply_markup=reply_markup)
+    except Exception as e:
+        logging.error(f"Error in send_disconnected_device_alert for {device['identification']['name']}: {str(e)}")
 
 # ----------------------------------------------------------
 # التعامل مع الأجهزة من نوع Station
 
 async def handle_station_device(device, application):
-    name = device['identification']['name']
-    device_id = device['identification']['id']
-    ip_address = device['overview'].get('ipAddress', 'غير متوفر')
-    mac_address = device['identification'].get('mac', 'غير متوفر')
-    cable_status = device['overview'].get('cable', 'غير متوفر')
-    signal_strength = device['overview'].get('signal', 'غير متوفر')
+    try:
+        name = device['identification']['name']
+        device_id = device['identification']['id']
+        ip_address = device['overview'].get('ipAddress', 'غير متوفر')
+        mac_address = device['identification'].get('mac', 'غير متوفر')
+        cable_status = device['overview'].get('cable', 'غير متوفر')
+        signal_strength = device['overview'].get('signal', 'غير متوفر')
 
-    # تحقق من حالة الاتصال
-    if device['overview']['status'] == 'connected':
-        if cable_status in ["10mp", "unplugged"] or (signal_strength != "غير متوفر" and float(signal_strength) < -70):
-            msg = (
-                f"⚠️ الجهاز '{name}'\n"
-                f"MAC: {mac_address}\n"
-                f"عنوان IP: {ip_address}\n"
-                f"حالة الكابل: {cable_status}\n"
-                f"الإشارة: {signal_strength}\n"
-                f"يرجى اتخاذ إجراء."
-            )
-            await application.bot.send_message(chat_id=STATION_GROUP_CHAT_ID, text=msg)
+        # تحقق من حالة الاتصال
+        if device['overview']['status'] == 'connected':
+            if cable_status in ["10mp", "unplugged"] or (signal_strength != "غير متوفر" and float(signal_strength) < -70):
+                msg = (
+                    f"⚠️ الجهاز '{name}'\n"
+                    f"MAC: {mac_address}\n"
+                    f"عنوان IP: {ip_address}\n"
+                    f"حالة الكابل: {cable_status}\n"
+                    f"الإشارة: {signal_strength}\n"
+                    f"يرجى اتخاذ إجراء."
+                )
+                await application.bot.send_message(chat_id=STATION_GROUP_CHAT_ID, text=msg)
 
-    # تحقق من الأجهزة المنقطعة لمدة تزيد عن 20 يومًا
-    disconnection_duration = device['overview'].get('lastSeen')
-    if disconnection_duration:
-        await send_disconnected_device_alert(device, disconnection_duration, application)
+        # تحقق من الأجهزة المنقطعة لمدة تزيد عن 20 يومًا
+        disconnection_duration = device['overview'].get('lastSeen')
+        if disconnection_duration:
+            await send_disconnected_device_alert(device, disconnection_duration, application)
+    except Exception as e:
+        logging.error(f"Error in handle_station_device for {device['identification']['name']}: {str(e)}")
 
 # ----------------------------------------------------------
 # المراقبة الدورية للشبكة
@@ -123,14 +129,18 @@ async def monitor_network(application):
                 for device in devices:
                     role = device['identification']['role'].lower()
                     if role == 'station':
-                        await handle_station_device(device, application)
+                        try:
+                            await handle_station_device(device, application)
+                        except Exception as e:
+                            logging.error(f"Error handling station device {device['identification']['name']}: {str(e)}")
 
                 await asyncio.sleep(300)
 
             else:
                 logging.error(f"Error fetching devices: {response.status_code} - {response.text}")
         except Exception as e:
-            logging.error(f"Error in network monitoring: {str(e)}")
+            logging.error(f"Error in network monitoring loop: {str(e)}")
+            await asyncio.sleep(10)  # لتجنب التكرار السريع في حال وجود خطأ مستمر
 
 # ----------------------------------------------------------
 # تشغيل البوت
