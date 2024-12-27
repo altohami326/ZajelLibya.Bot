@@ -167,6 +167,10 @@ def build_disconnected_device_message(device, disconnection_duration, ip_address
     # استخراج الرقم من النص
     days_extracted = extract_days_from_text(disconnection_duration)
 
+     # -- أضف الملاحظة هنا --
+    if days_extracted and days_extracted >= 20:
+        base_msg += "\n\n💡 ملاحظة: هذا الجهاز انقطاعه تجاوز 20 يوماً"
+
     if days_extracted and days_extracted >= 20:
         # إعداد أزرار الإزالة وإعادة الربط
         device_id = device['identification']['id']
