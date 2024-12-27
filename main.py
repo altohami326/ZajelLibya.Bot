@@ -1,4 +1,4 @@
-# main.py (حل نهائي لتشغيل المهام داخل الحلقة النشطة فقط دون استخدام asyncio.run)
+  # main.py (حل نهائي لتشغيل المهام داخل الحلقة النشطة فقط دون استخدام asyncio.run)
 
 import logging
 import requests
@@ -178,6 +178,8 @@ def run_bot():
     loop = asyncio.get_event_loop()
     loop.create_task(monitor_network(application))
     loop.create_task(application.run_polling())
+    loop.create_task(application.run_polling())
+    logging.info("Polling started for Telegram updates.")
 
 # ----------------------------------------------------------
 if __name__ == '__main__':
