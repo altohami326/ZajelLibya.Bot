@@ -177,7 +177,7 @@ def run_bot():
     # تشغيل المهام داخل الحلقة النشطة
     loop = asyncio.get_event_loop()
     loop.create_task(monitor_network(application))
-    loop.create_task(application.run_polling())  # إزالة التكرار
+    loop.create_task(application.run_polling())  # تأكد من تشغيل polling مرة واحدة فقط
     logging.info("Polling started for Telegram updates.")
 
 
