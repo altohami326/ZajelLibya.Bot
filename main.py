@@ -43,7 +43,7 @@ def distance_between(lat1, lon1, lat2, lon2):
         return None
     R = 6371000  # نصف قطر الأرض بالمتر
     dlat = math.radians(lat2 - lat1)
-    dlon = math.radians(lon2 - lon1)
+    dlon = math.radians(lat2 - lon2)
     a = math.sin(dlat / 2) ** 2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon / 2) ** 2
     c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
     return R * c
@@ -79,120 +79,33 @@ async def send_disconnected_device_alert(device, disconnection_duration, applica
             await application.bot.send_message(chat_id=STATION_GROUP_CHAT_ID, text=msg, reply_markup=reply_markup)
 
 # ----------------------------------------------------------
-# التعامل مع الأزرار (إزالة أو إعادة الربط)
+# التعامل مع الأجهزة من نوع Station
 
-async def handle_device_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
+async def handle_station_device(device, application):
+    name = device['identification']['name']
+    device_id = device['identification']['id']
+    ip_address = device['overview'].get('ipAddress', 'غير متوفر')
+    mac_address = device['identification'].get('mac', 'غير متوفر')
+    cable_status = device['overview'].get('cable', 'غير متوفر')
+    signal_strength = device['overview'].get('signal', 'غير متوفر')
 
-    data = query.data
-    if data.startswith("confirm_remove_"):
-        device_id = data.split("_")[2]
-        await query.edit_message_text(
-            f"🗑️ تأكيد إزالة الجهاز {device_id}:\n"
-            f"اكتب كلمة 'دليل' في هذه المحادثة لتأكيد الإزالة."
-        )
-        context.user_data[query.from_user.id] = f"remove_device_{device_id}"
+    # تحقق من حالة الاتصال
+    if device['overview']['status'] == 'connected':
+        if cable_status in ["10mp", "unplugged"] or (signal_strength != "غير متوفر" and float(signal_strength) < -70):
+            msg = (
+                f"⚠️ الجهاز '{name}'\n"
+                f"MAC: {mac_address}\n"
+                f"عنوان IP: {ip_address}\n"
+                f"حالة الكابل: {cable_status}\n"
+                f"الإشارة: {signal_strength}\n"
+                f"يرجى اتخاذ إجراء."
+            )
+            await application.bot.send_message(chat_id=STATION_GROUP_CHAT_ID, text=msg)
 
-    elif data.startswith("confirm_reconnect_"):
-        device_id = data.split("_")[2]
-        await query.edit_message_text(
-            f"🔄 تأكيد إعادة الربط للجهاز {device_id}:\n"
-            f"اكتب كلمة 'دليل' في هذه المحادثة لتأكيد العملية."
-        )
-        context.user_data[query.from_user.id] = f"reconnect_device_{device_id}"
-
-# ----------------------------------------------------------
-# تأكيد العمليات عبر النصوص
-
-async def confirm_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_message = update.message.text
-    chat_id = update.effective_chat.id
-    user_id = update.effective_user.id
-
-    if user_message.lower() == "دليل":
-        action = context.user_data.get(user_id)
-        if action:
-            device_id = action.split("_")[2]
-
-            if action.startswith("remove_device_"):
-                uisp_monitor = UispMonitor(UISP_API_URL, UISP_API_TOKEN)
-                result = uisp_monitor.remove_device(device_id)
-                if result:
-                    await update.message.reply_text(f"🗑️ تم إزالة الجهاز {device_id} بنجاح.")
-                else:
-                    await update.message.reply_text(f"❌ تعذرت إزالة الجهاز {device_id}.")
-
-            elif action.startswith("reconnect_device_"):
-                uisp_monitor = UispMonitor(UISP_API_URL, UISP_API_TOKEN)
-                result = uisp_monitor.reconnect_device(device_id)
-                if result:
-                    await update.message.reply_text(f"🔄 تم إعادة ربط الجهاز {device_id} بنجاح.")
-                else:
-                    await update.message.reply_text(f"❌ تعذرت إعادة ربط الجهاز {device_id}.")
-
-            del context.user_data[user_id]
-        else:
-            await update.message.reply_text("❌ لا يوجد إجراء محدد.")
-    else:
-        await update.message.reply_text("⚠️ يجب كتابة كلمة 'دليل' لتأكيد الإجراء.")
-
-# ----------------------------------------------------------
-# مراقبة الترددات والمسافات بين نقاط الوصول (Access Points)
-
-async def check_ap_frequencies(application, devices, uisp_monitor):
-    DISTANCE_THRESHOLD = 200.0  # المسافة القصوى بالأمتار
-    FREQUENCY_DIFF_THRESHOLD = 20.0  # الفرق المسموح بالترددات
-
-    ap_list = []
-    for device in devices:
-        role = device['identification']['role'].lower()
-        if role in ['ap', 'access-point', 'access_point', 'access point']:
-            freq = uisp_monitor.get_frequency(device)
-            device_details = uisp_monitor.get_device_details(device['identification']['id'])
-            if not device_details:
-                continue
-
-            location = device_details.get('location', {})
-            lat = location.get('latitude')
-            lon = location.get('longitude')
-
-            if freq is None or lat is None or lon is None:
-                continue
-
-            ap_list.append({
-                'name': device['identification']['name'],
-                'id': device['identification']['id'],
-                'freq': freq,
-                'lat': float(lat),
-                'lon': float(lon)
-            })
-
-    checked_pairs = set()
-    for i in range(len(ap_list)):
-        for j in range(i+1, len(ap_list)):
-            ap1 = ap_list[i]
-            ap2 = ap_list[j]
-
-            dist = distance_between(ap1['lat'], ap1['lon'], ap2['lat'], ap2['lon'])
-            if dist is None:
-                continue
-
-            freq_diff = abs(ap1['freq'] - ap2['freq'])
-
-            if dist < DISTANCE_THRESHOLD and freq_diff < FREQUENCY_DIFF_THRESHOLD:
-                for chat_id in CHAT_IDS:
-                    msg = (
-                        f"⚠️ تنبيه بخصوص الترددات المتقاربة:\n\n"
-                        f"الجهاز الأول: {ap1['name']} (تردده {ap1['freq']} MHz)\n"
-                        f"الجهاز الثاني: {ap2['name']} (تردده {ap2['freq']} MHz)\n\n"
-                        f"المسافة التقريبية بينهما: {int(dist)} متر\n"
-                        f"الفرق في التردد: {int(freq_diff)} MHz\n\n"
-                        f"هذه الترددات قريبة جدًا وقد تسبب تشويشًا، الرجاء إعادة تنظيم التردد."
-                    )
-                    await application.bot.send_message(chat_id=chat_id, text=msg)
-
-            checked_pairs.add((ap1['id'], ap2['id']))
+    # تحقق من الأجهزة المنقطعة لمدة تزيد عن 20 يومًا
+    disconnection_duration = device['overview'].get('lastSeen')
+    if disconnection_duration:
+        await send_disconnected_device_alert(device, disconnection_duration, application)
 
 # ----------------------------------------------------------
 # المراقبة الدورية للشبكة
@@ -208,47 +121,16 @@ async def monitor_network(application):
                 devices = response.json()
 
                 for device in devices:
-                    role = device['identification']['role']
-                    status = device['overview']['status']
+                    role = device['identification']['role'].lower()
+                    if role == 'station':
+                        await handle_station_device(device, application)
 
-                    ip_address = uisp_monitor.get_device_ip(device)
-                    cable_status = uisp_monitor.get_cable_status(device)
-                    signal_strength = uisp_monitor.get_signal_strength(device)
-                    connection_duration = uisp_monitor.get_connection_duration(device)
-
-                    if role.lower() == 'station':
-                        if status == 'connected':
-                            if cable_status in ["10mp","unplugged"]:
-                                msg = (
-                                    f"⚠️ {device['identification']['name']} (Station) يواجه مشكلة في الكابل ({cable_status}).\n"
-                                    f"عنوان IP: {ip_address}"
-                                )
-                                await application.bot.send_message(chat_id=STATION_GROUP_CHAT_ID, text=msg)
-
-                            elif signal_strength != "غير متوفر" and float(signal_strength) < -75:
-                                msg = (
-                                    f"📡 تنبيه: إشارة ضعيفة للجهاز {device['identification']['name']}\n"
-                                    f"الإشارة: {signal_strength}\n"
-                                    f"عنوان IP: {ip_address}"
-                                )
-                                await application.bot.send_message(chat_id=STATION_GROUP_CHAT_ID, text=msg)
-
-                        if status not in ['connected', 'active']:
-                            disconnection_duration = uisp_monitor.get_disconnection_duration(device)
-                            await send_disconnected_device_alert(device, disconnection_duration, application)
-
-                    elif status not in ['connected', 'active']:
-                        disconnection_duration = uisp_monitor.get_disconnection_duration(device)
-                        await send_disconnected_device_alert(device, disconnection_duration, application)
-
-                await check_ap_frequencies(application, devices, uisp_monitor)
+                await asyncio.sleep(300)
 
             else:
                 logging.error(f"Error fetching devices: {response.status_code} - {response.text}")
         except Exception as e:
             logging.error(f"Error in network monitoring: {str(e)}")
-
-        await asyncio.sleep(300)
 
 # ----------------------------------------------------------
 # تشغيل البوت
@@ -257,7 +139,6 @@ async def run_bot():
     application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
     application.add_handler(CommandHandler('start', lambda update, context: update.message.reply_text("البوت يعمل!")))
     application.add_handler(CallbackQueryHandler(handle_device_action))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, confirm_action))
 
     asyncio.create_task(monitor_network(application))
     await application.run_polling()
