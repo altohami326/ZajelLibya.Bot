@@ -1,4 +1,4 @@
-# main.py (محدث مع معالجة نهائية لمشكلة event loop)
+# main.py (نهائي مع تشغيل المهام ضمن الحلقة النشطة فقط)
 
 import logging
 import requests
