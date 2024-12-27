@@ -1,4 +1,4 @@
-# main.py (حل نهائي لتشغيل المهام داخل الحلقة النشطة فقط)
+# main.py (تحديث نهائي لحل مشكلة الحلقة النشطة مع Telegram Bot)
 
 import logging
 import requests
@@ -177,10 +177,10 @@ async def run_bot():
     # تشغيل المهام داخل الحلقة النشطة
     loop = asyncio.get_event_loop()
     loop.create_task(monitor_network(application))
-    await application.run_polling()
+    loop.create_task(application.run_polling())
+    await asyncio.Event().wait()  # استمرار الحلقة إلى أجل غير مسمى
 
 # ----------------------------------------------------------
 if __name__ == '__main__':
     keep_alive()
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(run_bot())
+    asyncio.run(run_bot())
