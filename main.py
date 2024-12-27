@@ -151,8 +151,8 @@ async def monitor_network(application):
                 devices = response.json()
 
                 for device in devices:
-                    role = device['identification']['role'].lower()
-                    if role == 'station':
+                    role = device['identification'].get('role')
+                    if role and isinstance(role, str) and role.lower() == 'station':
                         try:
                             await handle_station_device(device, application)
                         except Exception as e:
