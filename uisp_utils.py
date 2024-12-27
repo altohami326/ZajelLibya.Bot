@@ -1,5 +1,3 @@
-# uisp_utils.py (محدث)
-
 import logging
 import requests
 from datetime import datetime
@@ -60,42 +58,64 @@ class UispMonitor:
         return "غير متوفر"
 
     def get_signal_strength(self, device):
+        """
+        تحاول جلب الإشارة من:
+          1) overview.signal
+          2) البحث في interfaces[..].wireless.stations[..]:
+             - إذا وجدنا rxSignal و txSignal: نأخذ متوسطهما
+             - إن وجدت واحدة فقط، نعيدها
+             - لو لم نجدهما، نحاول حساب متوسط rxChain و txChain معًا
+               أو rxChain وحدها، أو txChain وحدها حسب الموجود
+        """
         device_details = self.get_device_details(device['identification']['id'])
         if not device_details:
             return "غير متوفر"
 
+        # 1) محاولة أخذ الإشارة من overview
         overview_signal = device_details.get('overview', {}).get('signal')
         if overview_signal is not None:
             return overview_signal
 
+        # 2) البحث في الواجهات عن rxSignal/txSignal أو السلاسل
         interfaces = device_details.get('interfaces', [])
         for iface in interfaces:
             wireless_data = iface.get('wireless')
             if wireless_data and isinstance(wireless_data.get('stations'), list):
                 for station in wireless_data['stations']:
-                    rx_sig = station.get('rxSignal')
-                    tx_sig = station.get('txSignal')
-                    rx_chain = station.get('rxChain')
-                    tx_chain = station.get('txChain')
+                    rx_sig = station.get('rxSignal')    # رقم مفرد مثلاً -59
+                    tx_sig = station.get('txSignal')    # رقم مفرد مثلاً -54
+                    rx_chain = station.get('rxChain')   # قائمة مثلاً [-60, -58]
+                    tx_chain = station.get('txChain')   # قائمة مثلاً [-63, -64]
 
+                    # أ) إذا وجدنا rxSignal و txSignal معًا => نعيد متوسطهما
                     if rx_sig is not None and tx_sig is not None:
                         val = (rx_sig + tx_sig) / 2
                         return round(val, 1)
+
+                    # ب) إن وجدنا rxSignal فقط
                     if rx_sig is not None:
                         return rx_sig
+
+                    # ج) إن وجدنا txSignal فقط
                     if tx_sig is not None:
                         return tx_sig
+
+                    # د) لا توجد إشارات مفردة؛ نحاول سلاسل الـChain:
                     if rx_chain and len(rx_chain) > 0 and tx_chain and len(tx_chain) > 0:
                         avg_rx_chain = sum(rx_chain) / len(rx_chain)
                         avg_tx_chain = sum(tx_chain) / len(tx_chain)
                         val = (avg_rx_chain + avg_tx_chain) / 2
                         return round(val, 1)
+
                     if rx_chain and len(rx_chain) > 0:
                         avg_rx_chain = sum(rx_chain) / len(rx_chain)
                         return round(avg_rx_chain, 1)
+
                     if tx_chain and len(tx_chain) > 0:
                         avg_tx_chain = sum(tx_chain) / len(tx_chain)
                         return round(avg_tx_chain, 1)
+
+        # إذا لم نجد شيئًا
         return "غير متوفر"
 
     def get_connection_duration(self, device):
@@ -116,6 +136,9 @@ class UispMonitor:
         return "غير متوفر"
 
     def get_disconnection_duration(self, device):
+        """
+        تعيد القيمة النصية، مثل '3 أيام'، '1 ساعة'... إلخ.
+        """
         last_seen = device.get('overview', {}).get('lastSeen')
         if last_seen:
             last_seen_time = datetime.fromisoformat(last_seen[:-1])
@@ -136,9 +159,15 @@ class UispMonitor:
         return "غير متوفر"
 
     def get_frequency(self, device):
+        """
+        محاولة جلب التردد (Frequency) لجهاز Access Point.
+        - غالبًا ما يكون في device_details['overview']['frequency']
+          أو device_details['airmax']['frequency']
+          أو device_details['attributes']['frequency'].
+        """
         device_details = self.get_device_details(device['identification']['id'])
         if not device_details:
-            return None
+            return None  # غير متوفر
 
         overview_freq = device_details.get('overview', {}).get('frequency')
         if overview_freq:
@@ -152,20 +181,30 @@ class UispMonitor:
         if attributes_freq:
             return float(attributes_freq)
 
-        return None
+        return None  # لم نجد أي تردد
 
-    def remove_device(self, device_id):
-        try:
-            response = requests.delete(f"{self.api_url}/devices/{device_id}", headers=self.headers)
-            return response.status_code == 204
-        except Exception as e:
-            logging.error(f"Error removing device {device_id}: {str(e)}")
-            return False
+# ==============================
+# دوال جديدة لإزالة الجهاز أو إعادة ربطه (تخيلية)
+# ==============================
+def remove_device_from_uisp_api(api_url, headers, device_id):
+    """
+    مثال لطلب DELETE: /devices/{device_id}
+    قد يختلف حسب الـUISP API الحقيقية.
+    """
+    try:
+        response = requests.delete(f"{api_url}/devices/{device_id}", headers=headers)
+        return response.status_code, response.text
+    except Exception as e:
+        return None, str(e)
 
-    def reconnect_device(self, device_id):
-        try:
-            response = requests.post(f"{self.api_url}/devices/{device_id}/reconnect", headers=self.headers)
-            return response.status_code == 200
-        except Exception as e:
-            logging.error(f"Error reconnecting device {device_id}: {str(e)}")
-            return False
+def reconnect_device_to_uisp_api(api_url, headers, device_id):
+    """
+    مثال لطلب POST أو PATCH لإعادة ربط الجهاز. 
+    endpoint افتراضي: /devices/{device_id}/reconnect
+    قد تحتاج لتعديله حسب وثائق UISP.
+    """
+    try:
+        response = requests.post(f"{api_url}/devices/{device_id}/reconnect", headers=headers)
+        return response.status_code, response.text
+    except Exception as e:
+        return None, str(e)
