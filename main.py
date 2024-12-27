@@ -174,14 +174,13 @@ async def run_bot():
     application.add_handler(CommandHandler('start', lambda update, context: update.message.reply_text("البوت يعمل!")))
     application.add_handler(CallbackQueryHandler(handle_device_action))
 
-    try:
-        loop = asyncio.get_event_loop()
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-
-    loop.create_task(monitor_network(application))
-    await application.run_polling()
+    loop = asyncio.get_event_loop()
+    if loop.is_running():
+        loop.create_task(monitor_network(application))
+        await application.run_polling()
+    else:
+        loop.run_until_complete(monitor_network(application))
+        await application.run_polling()
 
 # ----------------------------------------------------------
 if __name__ == '__main__':
