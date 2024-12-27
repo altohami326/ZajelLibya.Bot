@@ -1,4 +1,4 @@
-# main.py (تحديث نهائي لتشغيل المهام داخل الحلقة النشطة فقط)
+# main.py (حل نهائي لتشغيل المهام داخل الحلقة النشطة فقط)
 
 import logging
 import requests
@@ -177,9 +177,10 @@ async def run_bot():
     # تشغيل المهام داخل الحلقة النشطة
     loop = asyncio.get_event_loop()
     loop.create_task(monitor_network(application))
-    loop.create_task(application.run_polling())
+    await application.run_polling()
 
 # ----------------------------------------------------------
 if __name__ == '__main__':
     keep_alive()
-    asyncio.run(run_bot())
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(run_bot())
